@@ -1,14 +1,11 @@
 links
 
 http://localhost:3000/status/349472    ---  saber status do contrato
+http://localhost:3000/monitor.html     ---  monitorar
+iniciar node....
+npm start
 
-C:\bipagem>npm start
-
-> bipagem-bling@1.0.0 start
-> node server.js
-
-http://localhost:3000/monitor.html
-
+iniciar tuneu ngrok
 ngrok http 3000
 
 status de pedido de venda
@@ -16,5 +13,6 @@ em andamento = 15
 em aberto = 6
 verificado = 24
 antedido = 9
+
 
 
