@@ -11,3 +11,10 @@ http://localhost:3000/monitor.html
 
 ngrok http 3000
 
+status de pedido de venda
+em andamento = 15
+em aberto = 6
+verificado = 24
+antedido = 9
+
+
