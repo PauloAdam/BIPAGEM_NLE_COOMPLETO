@@ -221,7 +221,6 @@ app.get("/pedido/:numero", async (req, res) => {
       });
     }
 
-    // 🔎 MONITOR
     monitor({ tipo: "PEDIDO_CARREGADO", pedido: numero });
 
     res.json(pedidoAtual);
@@ -258,7 +257,6 @@ app.post("/scan", (req, res) => {
 
   produto.bipado++;
 
-  // 🔎 MONITOR
   monitor({
     tipo: "SCAN",
     produto: produto.nome,
@@ -294,115 +292,68 @@ app.post("/finalizar", async (req, res) => {
     mapaCodigos = {};
     pedidoVendaId = null;
 
-    // 🔎 MONITOR
     monitor({ tipo: "PEDIDO_FINALIZADO" });
 
     return res.json({ ok: true });
 
   } catch (e) {
 
-  const erro = e.response?.data;
+    const erro = e.response?.data;
 
-  // ⏱️ Timeout → provavelmente sucesso
-  if (e.code === "ECONNABORTED") {
-    console.log("⏱️ Timeout no Bling, possível sucesso tardio");
+    // TIMEOUT → muitas vezes o Bling processa mesmo assim
+    if (e.code === "ECONNABORTED") {
+      pedidoAtual = {};
+      mapaCodigos = {};
+      pedidoVendaId = null;
 
-    pedidoAtual = {};
-    mapaCodigos = {};
-    pedidoVendaId = null;
+      monitor({ tipo: "PEDIDO_FINALIZADO_TIMEOUT" });
 
-    monitor({ tipo: "PEDIDO_FINALIZADO_TIMEOUT" });
+      return res.json({
+        ok: true,
+        aviso: "Tempo excedido. Estoque pode já ter sido lançado."
+      });
+    }
 
-    return res.json({
-      ok: true,
-      aviso: "Tempo excedido. Estoque pode já ter sido lançado."
+    // RESOURCE_NOT_FOUND → já processou
+    if (erro?.error?.type === "RESOURCE_NOT_FOUND") {
+      pedidoAtual = {};
+      mapaCodigos = {};
+      pedidoVendaId = null;
+
+      monitor({ tipo: "PEDIDO_FINALIZADO_ASSINCRONO" });
+
+      return res.json({
+        ok: true,
+        aviso: "Pedido processado no Bling. Estoque já foi baixado."
+      });
+    }
+
+    console.error("❌ ERRO FINALIZAR:", erro || e.message);
+
+    return res.status(500).json({
+      erro: "Erro ao finalizar pedido no Bling"
     });
   }
-
-  // 📦 Bling perdeu o recurso mas já processou
-  if (erro?.error?.type === "RESOURCE_NOT_FOUND") {
-    console.log("⚠️ Recurso não encontrado, mas estoque provavelmente lançado");
-
-    pedidoAtual = {};
-    mapaCodigos = {};
-    pedidoVendaId = null;
-
-    monitor({ tipo: "PEDIDO_FINALIZADO_ASSINCRONO" });
-
-    return res.json({
-      ok: true,
-      aviso: "Pedido processado no Bling. Estoque já foi baixado."
-    });
-  }
-
-  console.error(
-    "❌ ERRO FINALIZAR:",
-    JSON.stringify(erro || e.message, null, 2)
-  );
-
-  return res.status(500).json({
-    erro: "Erro ao finalizar pedido no Bling"
-  });
-}
-
 });
 
-
 /* =========================
-   MONITOR (SSE)
-========================= */
-let clientesMonitor = [];
-
-app.get("/monitor/stream", (req, res) => {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders();
-
-  clientesMonitor.push(res);
-
-  req.on("close", () => {
-    clientesMonitor = clientesMonitor.filter(c => c !== res);
-  });
-});
-
-function enviarMonitor(evento, dados = {}) {
-  const payload = `data: ${JSON.stringify({
-    evento,
-    hora: new Date().toLocaleTimeString(),
-    ...dados
-  })}\n\n`;
-
-  clientesMonitor.forEach(c => c.write(payload));
-}
-
-
-/* =========================
-   START
-========================= */
-const PORT = process.env.PORT || 3000;
-
-/* =========================
-   STATUS DO PEDIDO (BLING)
+   STATUS DO PEDIDO (NOVO)
 ========================= */
 app.get("/status/:numero", async (req, res) => {
   const numero = req.params.numero;
 
   try {
-    const api = await bling(); // usa sua função existente
+    const api = await bling();
 
+    // ⭐ PARAMETRO CORRETO É "numero"
     const r = await api.get("/pedidos/vendas", {
-      params: {
-        numeroPedido: numero
-      }
+      params: { numero }
     });
 
-    // não encontrou pedido
-    if (!r.data || !r.data.data || r.data.data.length === 0) {
+    if (!r.data?.data?.length) {
       return res.json({ erro: "Pedido não encontrado no Bling." });
     }
 
-    // retorna exatamente o JSON do Bling
     return res.json(r.data.data[0]);
 
   } catch (e) {
@@ -414,14 +365,19 @@ app.get("/status/:numero", async (req, res) => {
   }
 });
 
+/* =========================
+   START
+========================= */
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`🚀 Sistema rodando em http://localhost:${PORT}`);
 });
 
 
-
-//rora temporaria descobrir id situação PEDIDO
+/* =========================
+   ROTA TEMPORÁRIA SITUAÇÕES
+========================= */
 app.get("/bling/situacoes", async (req, res) => {
   try {
     const api = await bling();
@@ -431,6 +387,3 @@ app.get("/bling/situacoes", async (req, res) => {
     res.status(500).json(e.response?.data || e.message);
   }
 });
-
-
-
