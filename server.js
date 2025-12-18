@@ -31,6 +31,33 @@ let pedidoVendaId = null;
 let blingOcupado = false;
 
 /* =========================
+   🔎 MONITOR (SSE)
+========================= */
+let monitores = [];
+
+function monitor(evento) {
+  const payload = `data: ${JSON.stringify({
+    ...evento,
+    hora: new Date().toLocaleTimeString()
+  })}\n\n`;
+
+  monitores.forEach(res => res.write(payload));
+}
+
+app.get("/monitor/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  res.write(`data: {"tipo":"CONECTADO"}\n\n`);
+  monitores.push(res);
+
+  req.on("close", () => {
+    monitores = monitores.filter(r => r !== res);
+  });
+});
+
+/* =========================
    CLIENTE BLING
 ========================= */
 async function bling() {
@@ -41,7 +68,7 @@ async function bling() {
       Authorization: `Bearer ${token}`,
       Accept: "application/json"
     },
-    timeout: 15000
+    timeout: 60000
   });
 }
 
@@ -96,7 +123,6 @@ app.get("/oauth/callback", async (req, res) => {
 
     res.send("✅ Bling autenticado com sucesso. Pode fechar esta página.");
   } catch (e) {
-    console.error("OAuth error:", e.response?.data || e.message);
     res.status(500).send("Erro ao autenticar no Bling");
   }
 });
@@ -155,14 +181,12 @@ app.get("/pedido/:numero", async (req, res) => {
     const detalhe = await api.get(`/pedidos/vendas/${pedidoVendaId}`);
     const pedido = detalhe.data?.data;
 
-    // 🔒 BLOQUEIA VERIFICADO
     if (pedido?.situacao?.id === SITUACAO_VERIFICADO) {
       return res.status(409).json({
         erro: "ESTE PEDIDO JÁ FOI VERIFICADO"
       });
     }
 
-    // 🔄 MUDA PARA EM ANDAMENTO (SEM MUDAR SUA LÓGICA)
     if (pedido?.situacao?.id === SITUACAO_ABERTO) {
       await api.patch(
         `/pedidos/vendas/${pedidoVendaId}/situacoes/${SITUACAO_ANDAMENTO}`
@@ -183,9 +207,7 @@ app.get("/pedido/:numero", async (req, res) => {
         codigos: []
       };
 
-      if (i.codigo) {
-        pedidoAtual[idProduto].codigos.push(String(i.codigo));
-      }
+      if (i.codigo) pedidoAtual[idProduto].codigos.push(String(i.codigo));
 
       try {
         const prod = await api.get(`/produtos/${idProduto}`);
@@ -199,13 +221,12 @@ app.get("/pedido/:numero", async (req, res) => {
       });
     }
 
+    // 🔎 MONITOR
+    monitor({ tipo: "PEDIDO_CARREGADO", pedido: numero });
+
     res.json(pedidoAtual);
 
   } catch (e) {
-    console.error(
-      "Erro Bling:",
-      JSON.stringify(e.response?.data || e.message, null, 2)
-    );
     res.status(500).json({
       erro: "Erro ao carregar pedido"
     });
@@ -237,6 +258,14 @@ app.post("/scan", (req, res) => {
 
   produto.bipado++;
 
+  // 🔎 MONITOR
+  monitor({
+    tipo: "SCAN",
+    produto: produto.nome,
+    bipado: produto.bipado,
+    total: produto.pedido
+  });
+
   res.json({
     idProduto,
     bipado: produto.bipado
@@ -265,38 +294,143 @@ app.post("/finalizar", async (req, res) => {
     mapaCodigos = {};
     pedidoVendaId = null;
 
-    res.json({ ok: true });
+    // 🔎 MONITOR
+    monitor({ tipo: "PEDIDO_FINALIZADO" });
+
+    return res.json({ ok: true });
 
   } catch (e) {
-    console.error(
-      "Erro ao finalizar:",
-      JSON.stringify(e.response?.data, null, 2)
-    );
-    res.status(500).json({
-      erro: "Erro ao finalizar pedido no Bling"
+
+  const erro = e.response?.data;
+
+  // ⏱️ Timeout → provavelmente sucesso
+  if (e.code === "ECONNABORTED") {
+    console.log("⏱️ Timeout no Bling, possível sucesso tardio");
+
+    pedidoAtual = {};
+    mapaCodigos = {};
+    pedidoVendaId = null;
+
+    monitor({ tipo: "PEDIDO_FINALIZADO_TIMEOUT" });
+
+    return res.json({
+      ok: true,
+      aviso: "Tempo excedido. Estoque pode já ter sido lançado."
     });
   }
+
+  // 📦 Bling perdeu o recurso mas já processou
+  if (erro?.error?.type === "RESOURCE_NOT_FOUND") {
+    console.log("⚠️ Recurso não encontrado, mas estoque provavelmente lançado");
+
+    pedidoAtual = {};
+    mapaCodigos = {};
+    pedidoVendaId = null;
+
+    monitor({ tipo: "PEDIDO_FINALIZADO_ASSINCRONO" });
+
+    return res.json({
+      ok: true,
+      aviso: "Pedido processado no Bling. Estoque já foi baixado."
+    });
+  }
+
+  console.error(
+    "❌ ERRO FINALIZAR:",
+    JSON.stringify(erro || e.message, null, 2)
+  );
+
+  return res.status(500).json({
+    erro: "Erro ao finalizar pedido no Bling"
+  });
+}
+
 });
+
+
+/* =========================
+   MONITOR (SSE)
+========================= */
+let clientesMonitor = [];
+
+app.get("/monitor/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  clientesMonitor.push(res);
+
+  req.on("close", () => {
+    clientesMonitor = clientesMonitor.filter(c => c !== res);
+  });
+});
+
+function enviarMonitor(evento, dados = {}) {
+  const payload = `data: ${JSON.stringify({
+    evento,
+    hora: new Date().toLocaleTimeString(),
+    ...dados
+  })}\n\n`;
+
+  clientesMonitor.forEach(c => c.write(payload));
+}
+
 
 /* =========================
    START
 ========================= */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Sistema rodando em http://localhost:${PORT}`);
-  console.log(`👉 OAuth: http://localhost:${PORT}/oauth/login`);
+
+/* =========================
+   STATUS DO PEDIDO (BLING)
+========================= */
+app.get("/status/:numero", async (req, res) => {
+  const numero = req.params.numero;
+
+  try {
+    const api = await bling(); // usa sua função existente
+
+    const r = await api.get("/pedidos/vendas", {
+      params: {
+        numeroPedido: numero
+      }
+    });
+
+    // não encontrou pedido
+    if (!r.data || !r.data.data || r.data.data.length === 0) {
+      return res.json({ erro: "Pedido não encontrado no Bling." });
+    }
+
+    // retorna exatamente o JSON do Bling
+    return res.json(r.data.data[0]);
+
+  } catch (e) {
+    console.error("❌ ERRO REAL:", e.response?.data || e.message);
+    res.json({
+      erro: "Erro ao consultar status no Bling.",
+      detalhe: e.response?.data || e.message
+    });
+  }
 });
 
-/* =========================
-  ABERTO → 6
-  EM ANDAMENTO → 15
-  VERIFICADO → 24
-========================= */
 
-/* =========================
-  ABERTO → id = 6
+app.listen(PORT, () => {
+  console.log(`🚀 Sistema rodando em http://localhost:${PORT}`);
+});
 
-EM ANDAMENTO → id = 15
 
-VERIFICADO → id = 24
-========================= */
+
+//rora temporaria descobrir id situação PEDIDO
+app.get("/bling/situacoes", async (req, res) => {
+  try {
+    const api = await bling();
+    const r = await api.get("/situacoes");
+    res.json(r.data);
+  } catch (e) {
+    res.status(500).json(e.response?.data || e.message);
+  }
+});
+
+
+
