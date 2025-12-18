@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Monitor em Tempo Real</title>
+
+<style>
+body {
+  background:#020617;
+  color:#e5e7eb;
+  font-family: Arial, sans-serif;
+  padding:20px;
+}
+h1 { text-align:center; }
+.log {
+  border-bottom:1px solid #334155;
+  padding:10px;
+  font-size:20px;
+}
+.scan { color:#22c55e; }
+.info { color:#38bdf8; }
+.fim  { color:#facc15; }
+#blingBox {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  margin-bottom:15px;
+  font-size:16px;
+  font-weight:bold;
+}
+
+.dot {
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  display:inline-block;
+}
+
+.dot.on {
+  background:#22c55e; /* verde */
+  box-shadow:0 0 10px #22c55e;
+}
+
+.dot.off {
+  background:#ef4444; /* vermelho */
+  box-shadow:0 0 10px #ef4444;
+}
+
+</style>
+</head>
+
+<body>
+
+<h1>📡 Monitor de Separação</h1>
+<div id="blingBox">
+  <span id="blingDot" class="dot off"></span>
+  <span id="blingText">Verificando Bling...</span>
+</div>
+
+<div id="logs"></div>
+
+<script>
+const logs = document.getElementById("logs");
+const es = new EventSource("/monitor/stream");
+
+es.onmessage = e => {
+  const d = JSON.parse(e.data);
+
+  const div = document.createElement("div");
+  div.className =
+    "log " +
+    (d.tipo === "SCAN" ? "scan" :
+     d.tipo === "PEDIDO_FINALIZADO" ? "fim" : "info");
+
+  div.textContent =
+    `[${d.hora}] ${d.tipo}` +
+    (d.produto ? ` — ${d.produto} (${d.bipado}/${d.total})` : "");
+
+  logs.prepend(div);
+};
+async function verificarBling() {
+  try {
+    const r = await fetch("/bling/status");
+    const d = await r.json();
+
+    const dot = document.getElementById("blingDot");
+    const txt = document.getElementById("blingText");
+
+    if (d.conectado) {
+      dot.className = "dot on";
+      txt.textContent = "Bling conectado";
+    } else {
+      throw 0;
+    }
+  } catch {
+    const dot = document.getElementById("blingDot");
+    const txt = document.getElementById("blingText");
+
+    dot.className = "dot off";
+    txt.textContent = "Bling desconectado";
+  }
+}
+
+// verifica ao abrir
+verificarBling();
+
+// verifica a cada 30s
+setInterval(verificarBling, 30000);
+
+</script>
+
+</body>
+</html>
