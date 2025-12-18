@@ -1,0 +1,51 @@
+
+  Invoke-RestMethod `
+  -Method Post `
+  -Uri "https://www.bling.com.br/Api/v3/oauth/token" `
+  -Headers @{
+    Authorization = "Basic ODdmMDY3YjdiMGUwNDEzMzE1MWIwMzdjMDZhMGJhOGE4YTRmYzFmZTpmOTE1NGVjMDVkZWE2MDA1OTM0YTJiMTc3MmNkODcxZTAwMzBmMGJhOWZkNGMwZjAxYjlhMzUyNmEyNmU=
+"
+  } `
+  -ContentType "application/x-www-form-urlencoded" `
+  -Body @{
+    grant_type   = "authorization_code"
+    code         = "9355bb662f2c372d83a8fb81d21273f4173adbd1"
+    redirect_uri = "http://localhost"
+  }
+
+
+
+
+access_token  : 24a697509d5e4111e4ea703d12a7d2a609f11680
+expires_in    : 21600
+token_type    : Bearer
+scope         : 363953167 6631498 333936575 98314 5990556 363953556 318257556 318257570 791588404 1869535257 363921592
+                98310 98309
+refresh_token : d71ebdc77ea1772016cc1bbcc031307411f54916
+
+
+
+
+
+Invoke-RestMethod `
+  -Method Get `
+  -Uri "https://www.bling.com.br/Api/v3/produtos?limite=5" `
+  -Headers @{
+    Authorization = "Bearer 24a697509d5e4111e4ea703d12a7d2a609f11680"
+  }
+  
+  
+script para renovar token
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "https://www.bling.com.br/Api/v3/oauth/token" `
+  -Headers @{
+    Authorization = "Basic ODdmMDY3YjdiMGUwNDEzMzE1MWIwMzdjMDZhMGJhOGE4YTRmYzFmZTpmOTE1NGVjMDVkZWE2MDA1OTM0YTJiMTc3MmNkODcxZTAwMzBmMGJhOWZkNGMwZjAxYjlhMzUyNmEyNmU="
+  } `
+  -ContentType "application/x-www-form-urlencoded" `
+  -Body @{
+    grant_type    = "refresh_token"
+    refresh_token = "d71ebdc77ea1772016cc1bbcc031307411f54916"
+  }
+  
