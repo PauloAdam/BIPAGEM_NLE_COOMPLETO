@@ -111,6 +111,81 @@ button:disabled {
 @media (min-width: 1024px) {
   .container { max-width:600px; }
 }
+
+/* ================= BLING STATUS ================= */
+#blingBox {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  margin-bottom:15px;
+  font-size:16px;
+  font-weight:bold;
+}
+
+.dot {
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  display:inline-block;
+}
+
+.dot.on {
+  background:#22c55e;
+  box-shadow:0 0 10px #22c55e;
+}
+
+.dot.off {
+  background:#ef4444;
+  box-shadow:0 0 10px #ef4444;
+}
+
+/* ================= TELA DE CONFIRMAÇÃO ================= */
+#confirmacaoFalta {
+  position:fixed;
+  inset:0;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  background:rgba(0,0,0,0.75);
+  z-index:99999;
+}
+#confirmacaoFalta .box {
+  background:#0f172a;
+  padding:30px;
+  border-radius:20px;
+  width:90%;
+  max-width:420px;
+  text-align:center;
+  border:6px solid #ca8a04;
+}
+#confirmacaoFalta h2 {
+  color:#facc15;
+  margin-bottom:20px;
+  font-size:26px;
+}
+#confirmacaoFalta p {
+  font-size:20px;
+  margin-bottom:30px;
+  white-space:pre-line;
+}
+#btnConfirmarFalta {
+  padding:18px;
+  font-size:20px;
+  width:100%;
+  border-radius:12px;
+  background:#16a34a;
+  color:#fff;
+  margin-bottom:12px;
+}
+#btnCancelarFalta {
+  padding:18px;
+  font-size:20px;
+  width:100%;
+  border-radius:12px;
+  background:#ef4444;
+  color:#fff;
+}
 </style>
 </head>
 
@@ -118,6 +193,11 @@ button:disabled {
 <div class="container">
 
 <h2>Separação de Pedido</h2>
+
+<div id="blingBox">
+  <span id="blingDot" class="dot off"></span>
+  <span id="blingText">Verificando Bling...</span>
+</div>
 
 <input id="pedidoInput" placeholder="Número do pedido">
 <button id="btnPedido" class="primary" onclick="carregarPedido()">
@@ -131,7 +211,7 @@ button:disabled {
 <div id="ativo"></div>
 <div id="lista"></div>
 
-<button class="success" onclick="finalizarPedido()">
+<button id="btnFinalizar" class="success" onclick="finalizarPedido()">
   Finalizar Pedido
 </button>
 
@@ -142,15 +222,25 @@ button:disabled {
   <div id="alertaBox" class="box"></div>
 </div>
 
+<!-- CONFIRMAÇÃO DE FALTA -->
+<div id="confirmacaoFalta">
+  <div class="box">
+    <h2>Itens Faltando</h2>
+    <p id="msgFalta"></p>
+    <button id="btnConfirmarFalta">Finalizar Mesmo Assim</button>
+    <button id="btnCancelarFalta">Cancelar</button>
+  </div>
+</div>
+
 <audio id="sndOk" src="success.mp3"></audio>
 <audio id="sndErro" src="error.mp3"></audio>
 
 <script>
-/* ⚠️ LOGICA 100% INTACTA – NÃO TOQUEI */
 let pedido = {};
 let produtoAtivo = null;
 let finalizado = {};
 let alertaTimer = null;
+let finalizando = false;
 
 const scanInput = document.getElementById("scanInput");
 const alerta = document.getElementById("alerta");
@@ -159,8 +249,9 @@ const sndOk = document.getElementById("sndOk");
 const sndErro = document.getElementById("sndErro");
 const btnPedido = document.getElementById("btnPedido");
 const pedidoInput = document.getElementById("pedidoInput");
+const btnFinalizar = document.getElementById("btnFinalizar");
 
-function focoScan(){ setTimeout(()=>scanInput.focus(),50); }
+function focoScan(){ setTimeout(()=>scanInput.focus(),60); }
 
 function status(msg,tipo="info"){
   clearTimeout(alertaTimer);
@@ -170,64 +261,195 @@ function status(msg,tipo="info"){
   alertaTimer=setTimeout(()=>alerta.style.display="none",3000);
 }
 
+/* ================= BLING ================= */
+async function verificarBling() {
+  try {
+    const r = await fetch("/bling/status");
+    const d = await r.json();
+    const dot = document.getElementById("blingDot");
+    const txt = document.getElementById("blingText");
+
+    if (d.conectado) {
+      dot.className = "dot on";
+      txt.textContent = "Bling conectado";
+    } else throw 0;
+  } catch {
+    document.getElementById("blingDot").className = "dot off";
+    document.getElementById("blingText").textContent = "Bling desconectado";
+  }
+}
+verificarBling();
+setInterval(verificarBling,30000);
+
+/* ================= PEDIDO ================= */
 async function carregarPedido(){
   const num=pedidoInput.value.trim();
   if(!num){status("INFORME O PEDIDO","erro");sndErro.play();return;}
-  btnPedido.disabled=true;pedidoInput.disabled=true;
-  const r=await fetch("/pedido/"+num);const d=await r.json();
-  if(d.erro){status(d.erro,"erro");sndErro.play();btnPedido.disabled=false;pedidoInput.disabled=false;return;}
-  pedido=d;produtoAtivo=null;finalizado={};
+
+  btnPedido.disabled=true;
+  pedidoInput.disabled=true;
+
+  const r=await fetch("/pedido/"+num);
+  const d=await r.json();
+
+  if(d.erro){
+    status(d.erro,"erro");sndErro.play();
+    btnPedido.disabled=false;
+    pedidoInput.disabled=false;
+    return;
+  }
+
+  pedido=d;
+  produtoAtivo=null;
+  finalizado={};
+
   status("PEDIDO CARREGADO\nBIPE UM PRODUTO","ok");
-  render();focoScan();
+  render();
+  focoScan();
 }
 
+/* ================= SCAN ================= */
 scanInput.addEventListener("keydown",async e=>{
   if(e.key!=="Enter")return;
-  const codigo=scanInput.value.trim();scanInput.value="";
+
+  const codigo=scanInput.value.trim();
+  scanInput.value="";
+
   if(produtoAtivo){
     const c=pedido[produtoAtivo].codigos||[];
-    if(!c.includes(codigo)){status("TERMINE O ITEM ABERTO","erro");sndErro.play();return;}
+    if(!c.includes(codigo)){
+      status("TERMINE O ITEM ABERTO","erro");
+      sndErro.play();
+      return;
+    }
   }
-  const r=await fetch("/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({codigo})});
+
+  const r=await fetch("/scan",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({codigo})
+  });
+
   const d=await r.json();
-  if(d.erro){status(d.erro,"erro");sndErro.play();return;}
+
+  if(d.erro){ status(d.erro,"erro"); sndErro.play(); return; }
+
   pedido[d.idProduto].bipado=d.bipado;
-  if(!produtoAtivo){produtoAtivo=d.idProduto;status("TERMINE ESTE ITEM","info");}
+
+  if(!produtoAtivo){
+    produtoAtivo=d.idProduto;
+    status("TERMINE ESTE ITEM","info");
+  }
+
   if(pedido[d.idProduto].bipado===pedido[d.idProduto].pedido){
-    finalizado[d.idProduto]=true;produtoAtivo=null;status("ITEM CONCLUÍDO","ok");sndOk.play();
-  } else sndOk.play();
-  render();focoScan();
+    finalizado[d.idProduto]=true;
+    produtoAtivo=null;
+    status("ITEM CONCLUÍDO","ok");
+    sndOk.play();
+  } else {
+    sndOk.play();
+  }
+
+  render();
+  focoScan();
 });
 
-function acabarItem(){
-  finalizado[produtoAtivo]=true;produtoAtivo=null;
-  status("FALTA NO ESTOQUE","erro");sndErro.play();render();focoScan();
-}
+/* ================= FINALIZAR ================= */
+const telaFalta = document.getElementById("confirmacaoFalta");
+const msgFalta = document.getElementById("msgFalta");
+const btnConfirmarFalta = document.getElementById("btnConfirmarFalta");
+const btnCancelarFalta = document.getElementById("btnCancelarFalta");
 
 async function finalizarPedido(){
+  if(finalizando) return;
+
   const falt=Object.values(pedido).filter(p=>p.bipado<p.pedido);
-  if(falt.length){status("PEDIDO COM FALTA","erro");sndErro.play();return;}
-  const r=await fetch("/finalizar",{method:"POST"});const d=await r.json();
-  if(d.ok){status("PEDIDO FINALIZADO","ok");sndOk.play();setTimeout(()=>location.reload(),1500);}
-  else{status("ERRO AO FINALIZAR","erro");sndErro.play();}
+
+  if(falt.length){
+    msgFalta.textContent = `Existem ${falt.length} item(ns) faltando.\nDeseja realmente finalizar?`;
+    telaFalta.style.display="flex";
+    focoScan();
+    return;
+  }
+
+  executarFinalizacao();
 }
 
+btnCancelarFalta.onclick = () => {
+  telaFalta.style.display="none";
+  status("PEDIDO COM FALTA","erro");
+  sndErro.play();
+  focoScan();
+};
+
+btnConfirmarFalta.onclick = () => {
+  telaFalta.style.display="none";
+
+  btnFinalizar.disabled = true;
+  btnFinalizar.textContent = "Finalizando...";
+
+  Object.values(pedido).forEach(p => p.bipado = p.pedido);
+
+  executarFinalizacao();
+};
+
+async function executarFinalizacao(){
+  finalizando=true;
+  btnFinalizar.disabled=true;
+  btnFinalizar.textContent="Finalizando...";
+
+  try{
+    const r=await fetch("/finalizar",{method:"POST"});
+    const d=await r.json();
+
+    if(d.ok){
+      status(d.aviso ? "✔ ESTOQUE LANÇADO\n"+d.aviso : "✔ PEDIDO FINALIZADO","ok");
+      sndOk.play();
+      setTimeout(()=>location.reload(),1500);
+    } else throw 0;
+
+  } catch {
+    status("⚠ ERRO AO FINALIZAR\nVERIFIQUE NO BLING","erro");
+    sndErro.play();
+    btnFinalizar.disabled=false;
+    btnFinalizar.textContent="Finalizar Pedido";
+    finalizando=false;
+  }
+}
+
+/* ================= RENDER ================= */
 function render(){
-  lista.innerHTML="";ativo.innerHTML="";
+  lista.innerHTML="";
+  ativo.innerHTML="";
+
   if(produtoAtivo){
     const p=pedido[produtoAtivo];
+
     ativo.innerHTML=`
       <div class="item active"><strong>${p.nome}</strong><span>${p.bipado}/${p.pedido}</span></div>
       <div class="counter">${p.bipado} / ${p.pedido}</div>
-      <button class="warn" onclick="acabarItem()">ACABOU NO ESTOQUE</button>`;
+      <button class="warn" onclick="acabarItem()">ACABOU NO ESTOQUE</button>
+    `;
     return;
   }
+
   Object.values(pedido).forEach(p=>{
-    lista.innerHTML+=`<div class="item ${p.bipado===p.pedido?"done":""}">
-      <span>${p.nome}</span><strong>${p.bipado}/${p.pedido}</strong></div>`;
+    lista.innerHTML += `
+      <div class="item ${p.bipado===p.pedido?"done":""}">
+        <span>${p.nome}</span>
+        <strong>${p.bipado}/${p.pedido}</strong>
+      </div>`;
   });
 }
-</script>
 
+function acabarItem(){
+  finalizado[produtoAtivo]=true;
+  produtoAtivo=null;
+  status("FALTA NO ESTOQUE","erro");
+  sndErro.play();
+  render();
+  focoScan();
+}
+</script>
 </body>
 </html>
